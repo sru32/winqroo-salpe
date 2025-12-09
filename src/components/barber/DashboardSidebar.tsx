@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Scissors, Store, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Scissors, Store, Calendar, LogOut } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useMockAuth';
@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 const menuItems = [
   { title: 'Overview', url: '/dashboard', icon: LayoutDashboard },
   { title: 'Queue Management', url: '/dashboard/queue', icon: Users },
+  { title: 'Appointments', url: '/dashboard/appointments', icon: Calendar },
   { title: 'Services', url: '/dashboard/services', icon: Scissors },
   { title: 'Shop Settings', url: '/dashboard/shop', icon: Store },
 ];

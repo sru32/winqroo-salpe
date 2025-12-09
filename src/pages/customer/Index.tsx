@@ -8,12 +8,14 @@ import ServiceSelection from '@/components/customer/ServiceSelection';
 import QueueStatus from '@/components/customer/QueueStatus';
 import ProfileSettings from '@/components/customer/ProfileSettings';
 import ActiveQueueBanner from '@/components/customer/ActiveQueueBanner';
+import MyAppointments from '@/components/customer/MyAppointments';
 import { useAuth } from '@/hooks/useMockAuth';
 import { useNavigate } from 'react-router-dom';
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Calendar } from 'lucide-react';
 const Index = () => {
-  const [view, setView] = useState('home'); // home, shops, service, queue, profile
+  const [view, setView] = useState('home'); // home, shops, service, queue, profile, appointments
   const [selectedShop, setSelectedShop] = useState(null);
   const [selectedService, setSelectedService] = useState(null);
   const [queueData, setQueueData] = useState(null);
@@ -66,6 +68,9 @@ const Index = () => {
   if (view === 'profile') {
     return <ProfileSettings onBack={() => setView('home')} />;
   }
+  if (view === 'appointments' && user) {
+    return <MyAppointments onBack={() => setView('home')} userId={user.id} />;
+  }
   return <div className="min-h-screen bg-background">
       {/* Header Navigation */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-background/95 backdrop-blur border-b border-border">
@@ -101,6 +106,10 @@ const Index = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem onClick={() => setView('appointments')}>
+                      <Calendar className="w-4 h-4 mr-2" />
+                      My Appointments
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setView('profile')}>
                       <Settings className="w-4 h-4 mr-2" />
                       Profile Settings

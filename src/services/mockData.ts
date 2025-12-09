@@ -7,11 +7,13 @@ const STORAGE_KEYS = {
   QUEUE_SERVICES: 'barberqueue_queue_services',
   USERS: 'barberqueue_users',
   SHOP_OWNERS: 'barberqueue_shop_owners',
+  APPOINTMENTS: 'barberqueue_appointments',
+  APPOINTMENT_SERVICES: 'barberqueue_appointment_services',
   DATA_VERSION: 'barberqueue_data_version',
 };
 
 // Data version - increment this to force data refresh
-const DATA_VERSION = '2.0.0';
+const DATA_VERSION = '3.0.0';
 
 // Helper functions
 const getFromStorage = <T,>(key: string, defaultValue: T): T => {
@@ -257,14 +259,14 @@ const initializeData = () => {
     },
   ];
 
-  // Indian users
-  const defaultUsers = [
-    { id: 'user1', email: 'shop@demo.com', role: 'shop_owner', name: 'Rajesh Sharma' },
-    { id: 'user2', email: 'customer@demo.com', role: 'customer', name: 'Arjun Kumar' },
-    { id: 'user3', email: 'owner2@demo.com', role: 'shop_owner', name: 'Vikram Singh' },
-    { id: 'user4', email: 'owner3@demo.com', role: 'shop_owner', name: 'Amit Patel' },
-    { id: 'user5', email: 'customer2@demo.com', role: 'customer', name: 'Priya Mehta' },
-    { id: 'user6', email: 'customer3@demo.com', role: 'customer', name: 'Rahul Verma' },
+  // Indian users with membership types
+  const defaultUsers: any[] = [
+    { id: 'user1', email: 'shop@demo.com', role: 'shop_owner', name: 'Rajesh Sharma', customer_type: null, loyalty_points: 0 },
+    { id: 'user2', email: 'customer@demo.com', role: 'customer', name: 'Arjun Kumar', customer_type: 'vip', loyalty_points: 150 },
+    { id: 'user3', email: 'owner2@demo.com', role: 'shop_owner', name: 'Vikram Singh', customer_type: null, loyalty_points: 0 },
+    { id: 'user4', email: 'owner3@demo.com', role: 'shop_owner', name: 'Amit Patel', customer_type: null, loyalty_points: 0 },
+    { id: 'user5', email: 'customer2@demo.com', role: 'customer', name: 'Priya Mehta', customer_type: 'regular', loyalty_points: 45 },
+    { id: 'user6', email: 'customer3@demo.com', role: 'customer', name: 'Rahul Verma', customer_type: 'regular', loyalty_points: 12 },
   ];
 
   // Check data version - if it doesn't match, update all data
@@ -331,6 +333,12 @@ const initializeData = () => {
   }
   if (shouldUpdateData || !localStorage.getItem(STORAGE_KEYS.QUEUE_SERVICES)) {
     saveToStorage(STORAGE_KEYS.QUEUE_SERVICES, []);
+  }
+  if (shouldUpdateData || !localStorage.getItem(STORAGE_KEYS.APPOINTMENTS)) {
+    saveToStorage(STORAGE_KEYS.APPOINTMENTS, []);
+  }
+  if (shouldUpdateData || !localStorage.getItem(STORAGE_KEYS.APPOINTMENT_SERVICES)) {
+    saveToStorage(STORAGE_KEYS.APPOINTMENT_SERVICES, []);
   }
   
   // Save the current data version
@@ -417,13 +425,40 @@ export const mockDb = {
     ),
   createQueue: (queue: any) => {
     const queues = getFromStorage(STORAGE_KEYS.QUEUES, []);
+    
+    // Calculate priority score based on customer type and emergency status
+    let priorityScore = 0;
+    if (queue.customer_type === 'vip') priorityScore = 100;
+    else if (queue.is_emergency) priorityScore = 80;
+    else if (queue.customer_type === 'regular' && queue.loyalty_points >= 50) priorityScore = 60;
+    else if (queue.customer_type === 'regular') priorityScore = 40;
+    else priorityScore = 20;
+    
     const newQueue = { 
       ...queue, 
       id: generateId(), 
       joined_at: new Date().toISOString(),
-      status: 'waiting'
+      status: 'waiting',
+      priority_score: priorityScore,
+      payment_option: queue.payment_option || 'pay_at_shop'
     };
     queues.push(newQueue);
+    
+    // Sort queues by priority score (descending) then by joined_at
+    queues.sort((a: any, b: any) => {
+      if (b.priority_score !== a.priority_score) {
+        return b.priority_score - a.priority_score;
+      }
+      return new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime();
+    });
+    
+    // Recalculate positions after sorting
+    queues.forEach((q: any, index: number) => {
+      if (q.status === 'waiting') {
+        q.position = index + 1;
+      }
+    });
+    
     saveToStorage(STORAGE_KEYS.QUEUES, queues);
     return newQueue;
   },
@@ -432,6 +467,22 @@ export const mockDb = {
     const index = queues.findIndex((q: any) => q.id === id);
     if (index !== -1) {
       queues[index] = { ...queues[index], ...updates };
+      
+      // If priority changed, re-sort
+      if (updates.priority_score !== undefined || updates.is_emergency !== undefined || updates.customer_type !== undefined) {
+        queues.sort((a: any, b: any) => {
+          if (b.priority_score !== a.priority_score) {
+            return b.priority_score - a.priority_score;
+          }
+          return new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime();
+        });
+        queues.forEach((q: any, idx: number) => {
+          if (q.status === 'waiting') {
+            q.position = idx + 1;
+          }
+        });
+      }
+      
       saveToStorage(STORAGE_KEYS.QUEUES, queues);
     }
     return queues[index];
@@ -490,5 +541,74 @@ export const mockDb = {
     shopOwners.push(newShopOwner);
     saveToStorage(STORAGE_KEYS.SHOP_OWNERS, shopOwners);
     return newShopOwner;
+  },
+
+  // Appointments
+  getAppointments: () => getFromStorage(STORAGE_KEYS.APPOINTMENTS, []),
+  getAppointment: (id: string) => getFromStorage(STORAGE_KEYS.APPOINTMENTS, []).find((a: any) => a.id === id),
+  getAppointmentsByShop: (shopId: string) =>
+    getFromStorage(STORAGE_KEYS.APPOINTMENTS, []).filter((a: any) => a.shop_id === shopId),
+  getAppointmentsByShopAndDate: (shopId: string, date: string) => {
+    const dateStr = new Date(date).toDateString();
+    return getFromStorage(STORAGE_KEYS.APPOINTMENTS, []).filter((a: any) => {
+      const appointmentDate = new Date(a.appointment_date).toDateString();
+      return a.shop_id === shopId && appointmentDate === dateStr && a.status !== 'cancelled';
+    });
+  },
+  createAppointment: (appointment: any) => {
+    const appointments = getFromStorage(STORAGE_KEYS.APPOINTMENTS, []);
+    const newAppointment = {
+      ...appointment,
+      id: generateId(),
+      created_at: new Date().toISOString(),
+      status: appointment.status || 'confirmed',
+      payment_option: appointment.payment_option || 'pay_at_shop'
+    };
+    appointments.push(newAppointment);
+    saveToStorage(STORAGE_KEYS.APPOINTMENTS, appointments);
+    return newAppointment;
+  },
+  updateAppointment: (id: string, updates: any) => {
+    const appointments = getFromStorage(STORAGE_KEYS.APPOINTMENTS, []);
+    const index = appointments.findIndex((a: any) => a.id === id);
+    if (index !== -1) {
+      appointments[index] = { ...appointments[index], ...updates };
+      saveToStorage(STORAGE_KEYS.APPOINTMENTS, appointments);
+    }
+    return appointments[index];
+  },
+  deleteAppointment: (id: string) => {
+    const appointments = getFromStorage(STORAGE_KEYS.APPOINTMENTS, []);
+    const filtered = appointments.filter((a: any) => a.id !== id);
+    saveToStorage(STORAGE_KEYS.APPOINTMENTS, filtered);
+  },
+  checkTimeSlotAvailable: (shopId: string, date: string, timeSlot: string, duration: number) => {
+    const appointments = getFromStorage(STORAGE_KEYS.APPOINTMENTS, []);
+    const dateStr = new Date(date).toDateString();
+    const slotStart = new Date(`${date} ${timeSlot}`);
+    const slotEnd = new Date(slotStart.getTime() + duration * 60000);
+    
+    return !appointments.some((a: any) => {
+      if (a.shop_id !== shopId || a.status === 'cancelled') return false;
+      const appointmentDate = new Date(a.appointment_date).toDateString();
+      if (appointmentDate !== dateStr) return false;
+      
+      const appointmentStart = new Date(a.appointment_date);
+      const appointmentEnd = new Date(appointmentStart.getTime() + (a.duration || 30) * 60000);
+      
+      // Check for overlap
+      return (slotStart < appointmentEnd && slotEnd > appointmentStart);
+    });
+  },
+
+  // Appointment Services
+  getAppointmentServices: () => getFromStorage(STORAGE_KEYS.APPOINTMENT_SERVICES, []),
+  getAppointmentServicesForAppointment: (appointmentId: string) =>
+    getFromStorage(STORAGE_KEYS.APPOINTMENT_SERVICES, []).filter((as: any) => as.appointment_id === appointmentId),
+  addAppointmentServices: (appointmentServices: any[]) => {
+    const current = getFromStorage(STORAGE_KEYS.APPOINTMENT_SERVICES, []);
+    const newServices = appointmentServices.map(as => ({ ...as, id: generateId() }));
+    saveToStorage(STORAGE_KEYS.APPOINTMENT_SERVICES, [...current, ...newServices]);
+    return newServices;
   },
 };

@@ -9,6 +9,7 @@ import Auth from "./pages/barber/Auth";
 import DashboardLayout from "./pages/barber/DashboardLayout";
 import Dashboard from "./pages/barber/Dashboard";
 import QueueManagement from "./pages/barber/QueueManagement";
+import AppointmentManagement from "./pages/barber/AppointmentManagement";
 import ServiceManagement from "./pages/barber/ServiceManagement";
 import ShopSettings from "./pages/barber/ShopSettings";
 import NotFound from "./pages/NotFound";
@@ -26,6 +27,7 @@ const App = () => (
             <Route path="/dashboard" element={<DashboardLayout />}>
               <Route index element={<Dashboard />} />
               <Route path="queue" element={<QueueManagement />} />
+              <Route path="appointments" element={<AppointmentManagement />} />
               <Route path="services" element={<ServiceManagement />} />
               <Route path="shop" element={<ShopSettings />} />
             </Route>
