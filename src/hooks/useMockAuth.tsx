@@ -1,170 +1,191 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { mockDb } from '@/services/mockData';
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 interface User {
   id: string;
-  email: string;
   name: string;
-  role: string;
+  email: string;
+  role: 'customer' | 'shop_owner';
 }
 
 interface AuthContextType {
   user: User | null;
-  session: any;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string, role: string, name: string) => Promise<{ error: Error | null }>;
-  signOut: () => Promise<void>;
   isShopOwner: boolean;
-  isCustomer: boolean;
-  userRole: string | null;
+  userRole: 'customer' | 'shop_owner' | null;
+  signIn: (email: string, password: string) => Promise<{ error?: { message: string } }>;
+  signUp: (email: string, password: string, role: 'customer' | 'shop_owner', name: string) => Promise<{ error?: { message: string } }>;
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const SESSION_KEY = 'barberqueue_session';
-
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [userRole, setUserRole] = useState<string | null>(null);
 
+  // Load user from localStorage on mount
   useEffect(() => {
-    // Check for existing session
-    const savedSession = localStorage.getItem(SESSION_KEY);
-    if (savedSession) {
+    const storedUser = localStorage.getItem('winqroo_user');
+    if (storedUser) {
       try {
-        const sessionData = JSON.parse(savedSession);
-        
-        // Update "John Customer" to "Abdul" if found
-        if (sessionData.user.name === 'John Customer') {
-          sessionData.user.name = 'Abdul';
-          localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
-          
-          // Also update in mockDb if exists
-          const dbUser = mockDb.getUserByEmail(sessionData.user.email);
-          if (dbUser) {
-            mockDb.updateUser(sessionData.user.id, { name: 'Abdul' });
-          }
-        }
-        
-        setUser(sessionData.user);
-        setSession(sessionData);
-        setUserRole(sessionData.user.role);
+        setUser(JSON.parse(storedUser));
       } catch (error) {
-        console.error('Error loading session:', error);
+        console.error('Error parsing stored user:', error);
+        localStorage.removeItem('winqroo_user');
+        localStorage.removeItem('winqroo_token');
       }
     }
     setLoading(false);
   }, []);
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string): Promise<{ error?: { message: string } }> => {
     try {
-      const existingUser = mockDb.getUserByEmail(email);
-      
-      if (!existingUser) {
-        return { error: new Error('Invalid credentials') };
-      }
-
-      const sessionData = {
-        user: existingUser,
-        access_token: 'mock_token_' + Date.now(),
-      };
-
-      setUser(existingUser);
-      setSession(sessionData);
-      setUserRole(existingUser.role);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
-
-      return { error: null };
-    } catch (error: any) {
-      return { error };
-    }
-  };
-
-  const signUp = async (email: string, password: string, role: string, name: string) => {
-    try {
-      const existingUser = mockDb.getUserByEmail(email);
-      
-      if (existingUser) {
-        return { error: new Error('User already exists') };
-      }
-
-      const newUser = mockDb.createUser({
-        email,
-        role,
-        name,
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
       });
 
-      // If shop owner, create a shop and link it
-      if (role === 'shop_owner') {
-        const qrCode = `SHOP_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const shop = mockDb.createShop({
-          name: 'My Barber Shop',
-          address: '',
-          qr_code: qrCode,
-          rating: 4.5,
-          phone: '',
-          description: '',
-          latitude: null,
-          longitude: null,
-          distance: null,
-          opening_hours: {
-            monday: '9:00 AM - 6:00 PM',
-            tuesday: '9:00 AM - 6:00 PM',
-            wednesday: '9:00 AM - 6:00 PM',
-            thursday: '9:00 AM - 6:00 PM',
-            friday: '9:00 AM - 6:00 PM',
-            saturday: '9:00 AM - 5:00 PM',
-            sunday: 'Closed'
-          }
-        });
+      if (!response.ok) {
+        // If API fails, try mock authentication
+        const mockUsers = JSON.parse(localStorage.getItem('winqroo_mock_users') || '[]');
+        const foundUser = mockUsers.find((u: User & { password: string }) => u.email === email && u.password === password);
+        
+        if (!foundUser) {
+          return { error: { message: 'Invalid email or password' } };
+        }
 
-        mockDb.createShopOwner({
-          user_id: newUser.id,
-          shop_id: shop.id,
-        });
+        const { password: _, ...userWithoutPassword } = foundUser;
+        setUser(userWithoutPassword);
+        localStorage.setItem('winqroo_user', JSON.stringify(userWithoutPassword));
+        return {};
       }
 
-      const sessionData = {
-        user: newUser,
-        access_token: 'mock_token_' + Date.now(),
-      };
+      const data = await response.json();
+      if (data.error) {
+        return { error: { message: data.error } };
+      }
 
-      setUser(newUser);
-      setSession(sessionData);
-      setUserRole(newUser.role);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
+      // Store token and user
+      if (data.token) {
+        localStorage.setItem('winqroo_token', data.token);
+      }
+      setUser(data.user);
+      localStorage.setItem('winqroo_user', JSON.stringify(data.user));
+      return {};
+    } catch (error) {
+      // Fallback to mock authentication if API is not available
+      const mockUsers = JSON.parse(localStorage.getItem('winqroo_mock_users') || '[]');
+      const foundUser = mockUsers.find((u: User & { password: string }) => u.email === email && u.password === password);
+      
+      if (!foundUser) {
+        return { error: { message: 'Invalid email or password' } };
+      }
 
-      return { error: null };
-    } catch (error: any) {
-      return { error };
+      const { password: _, ...userWithoutPassword } = foundUser;
+      setUser(userWithoutPassword);
+      localStorage.setItem('winqroo_user', JSON.stringify(userWithoutPassword));
+      return {};
     }
   };
 
-  const signOut = async () => {
-    setUser(null);
-    setSession(null);
-    setUserRole(null);
-    localStorage.removeItem(SESSION_KEY);
+  const signUp = async (
+    email: string,
+    password: string,
+    role: 'customer' | 'shop_owner',
+    name: string
+  ): Promise<{ error?: { message: string } }> => {
+    try {
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, role, name }),
+      });
+
+      if (!response.ok) {
+        // If API fails, use mock registration
+        const mockUsers = JSON.parse(localStorage.getItem('winqroo_mock_users') || '[]');
+        
+        if (mockUsers.some((u: User & { password: string }) => u.email === email)) {
+          return { error: { message: 'Email already registered' } };
+        }
+
+        const newUser: User & { password: string } = {
+          id: `user_${Date.now()}`,
+          name,
+          email,
+          role,
+          password,
+        };
+
+        mockUsers.push(newUser);
+        localStorage.setItem('winqroo_mock_users', JSON.stringify(mockUsers));
+
+        const { password: _, ...userWithoutPassword } = newUser;
+        setUser(userWithoutPassword);
+        localStorage.setItem('winqroo_user', JSON.stringify(userWithoutPassword));
+        return {};
+      }
+
+      const data = await response.json();
+      if (data.error) {
+        return { error: { message: data.error } };
+      }
+
+      // Store token and user
+      if (data.token) {
+        localStorage.setItem('winqroo_token', data.token);
+      }
+      setUser(data.user);
+      localStorage.setItem('winqroo_user', JSON.stringify(data.user));
+      return {};
+    } catch (error) {
+      // Fallback to mock registration if API is not available
+      const mockUsers = JSON.parse(localStorage.getItem('winqroo_mock_users') || '[]');
+      
+      if (mockUsers.some((u: User & { password: string }) => u.email === email)) {
+        return { error: { message: 'Email already registered' } };
+      }
+
+      const newUser: User & { password: string } = {
+        id: `user_${Date.now()}`,
+        name,
+        email,
+        role,
+        password,
+      };
+
+      mockUsers.push(newUser);
+      localStorage.setItem('winqroo_mock_users', JSON.stringify(mockUsers));
+
+      const { password: _, ...userWithoutPassword } = newUser;
+      setUser(userWithoutPassword);
+      localStorage.setItem('winqroo_user', JSON.stringify(userWithoutPassword));
+      return {};
+    }
   };
 
-  const isShopOwner = userRole === 'shop_owner';
-  const isCustomer = userRole === 'customer';
+  const signOut = async (): Promise<void> => {
+    setUser(null);
+    localStorage.removeItem('winqroo_user');
+    localStorage.removeItem('winqroo_token');
+  };
+
+  const isShopOwner = user?.role === 'shop_owner';
+  const userRole = user?.role || null;
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        session,
         loading,
+        isShopOwner,
+        userRole,
         signIn,
         signUp,
         signOut,
-        isShopOwner,
-        isCustomer,
-        userRole,
       }}
     >
       {children}
@@ -172,10 +193,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
-export const useAuth = () => {
+export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 };
+

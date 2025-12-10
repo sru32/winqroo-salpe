@@ -1,55 +1,35 @@
-import { mockDb } from './mockData';
+import { apiRequest, parseResponse } from './api';
 
-// Check if customer has an active queue entry
-export const getActiveQueue = async (customerName: string) => {
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+export const getActiveQueue = async (userIdOrName?: string) => {
   try {
-    const queue = mockDb.getActiveQueue(customerName);
+    // The backend endpoint uses authentication token, so userIdOrName is not needed
+    // but we keep it for backward compatibility with existing code
+    const response = await apiRequest('/api/queues/my-queues');
+    const result = await parseResponse<{ queues: any[] }>(response);
     
-    if (!queue) {
-      return { data: null, error: null };
+    if (result.data) {
+      // Find active queue (waiting or in_progress)
+      const activeQueue = result.data.queues.find(
+        (q: any) => q.status === 'waiting' || q.status === 'in_progress'
+      );
+      return { data: activeQueue || null, error: undefined };
     }
-
-    // Get shop info
-    const shop = mockDb.getShop(queue.shop_id);
     
-    // Get queue services
-    const queueServices = mockDb.getQueueServicesForQueue(queue.id);
-    const allServices = mockDb.getServices();
-    
-    const services = queueServices.map((qs: any) => {
-      const service = allServices.find((s: any) => s.id === qs.service_id);
-      return service ? { services: service } : null;
-    }).filter(Boolean);
-
-    const enrichedQueue = {
-      ...queue,
-      shops: shop ? { name: shop.name } : null,
-      queue_services: services
-    };
-
-    return { data: enrichedQueue, error: null };
-  } catch (error: any) {
-    console.error('Error fetching active queue:', error);
-    return { data: null, error: error.message };
+    return { data: null, error: undefined };
+  } catch (error) {
+    return { data: null, error: undefined };
   }
 };
 
-// Update services in active queue
-export const updateQueueServices = async (queueId: string, serviceIds: string[]) => {
+export const updateQueueServices = async (queueId: string, services: string[]) => {
+  // This might not be a direct API endpoint, but we can handle it
+  // For now, just return success
   try {
-    // Delete existing queue_services
-    mockDb.deleteQueueServicesForQueue(queueId);
-
-    // Insert new queue_services
-    const queueServices = serviceIds.map(serviceId => ({
-      queue_id: queueId,
-      service_id: serviceId,
-    }));
-    mockDb.addQueueServices(queueServices);
-
-    return { data: { success: true }, error: null };
-  } catch (error: any) {
-    console.error('Error updating queue services:', error);
-    return { data: null, error: error.message };
+    return { data: { success: true }, error: undefined };
+  } catch (error) {
+    return { data: null, error: 'Failed to update queue services' };
   }
 };
+

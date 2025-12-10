@@ -24,13 +24,23 @@ const ServiceSelection = ({ shop, onServiceSelect, onBack }) => {
   const [joining, setJoining] = useState(false);
   const [existingQueue, setExistingQueue] = useState(null);
   const [bookingMode, setBookingMode] = useState<'queue' | 'appointment'>('queue');
-  const [paymentOption, setPaymentOption] = useState<'pay_now' | 'pay_at_shop' | 'pay_after_service'>('pay_at_shop');
+  const [paymentOption, setPaymentOption] = useState<'pay_now' | 'pay_at_shop'>('pay_at_shop');
   const [isEmergency, setIsEmergency] = useState(false);
   const [emergencyReason, setEmergencyReason] = useState('');
   const [showPayment, setShowPayment] = useState(false);
   const [pendingQueue, setPendingQueue] = useState<any>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
+
+  // Check if priority (VIP or Emergency)
+  const isPriority = isEmergency || user?.customer_type === 'vip';
+  
+  // Force pay_now for priority bookings
+  useEffect(() => {
+    if (isPriority) {
+      setPaymentOption('pay_now');
+    }
+  }, [isPriority]);
 
   useEffect(() => {
     // Require authentication
@@ -85,7 +95,18 @@ const ServiceSelection = ({ shop, onServiceSelect, onBack }) => {
   };
 
   const getTotalPrice = () => {
+    const basePrice = selectedServices.reduce((sum, service) => sum + service.price, 0);
+    // Apply 150% price hike for priority bookings (2.5x original price)
+    return isPriority ? Math.round(basePrice * 2.5) : basePrice;
+  };
+
+  const getBasePrice = () => {
     return selectedServices.reduce((sum, service) => sum + service.price, 0);
+  };
+
+  const getPriceHike = () => {
+    if (!isPriority) return 0;
+    return Math.round(getBasePrice() * 1.5);
   };
 
   const handleJoinQueue = async () => {
@@ -195,13 +216,18 @@ const ServiceSelection = ({ shop, onServiceSelect, onBack }) => {
   }
 
   // If appointment mode and services selected, show appointment booking
+  // Note: This early return means the sticky footer button below won't be rendered
+  // The button is kept for potential future use or if the flow changes
   if (bookingMode === 'appointment' && selectedServices.length > 0) {
     return (
       <AppointmentBooking
         shop={shop}
         selectedServices={selectedServices}
         onBookingComplete={handleAppointmentComplete}
-        onBack={() => setBookingMode('queue')}
+        onBack={() => {
+          setBookingMode('queue');
+          setSelectedServices([]);
+        }}
         user={user}
       />
     );
@@ -338,17 +364,26 @@ const ServiceSelection = ({ shop, onServiceSelect, onBack }) => {
                       </div>
                     ))}
                   </div>
-                  <div className="flex justify-between items-center pt-2 border-t border-primary/20">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Total Duration: {getTotalDuration()} min</p>
-                      <p className="text-sm text-muted-foreground">
-                        Estimated wait: ~{shop.currentQueue * getTotalDuration()} minutes
-                      </p>
+                    <div className="flex justify-between items-center pt-2 border-t border-primary/20">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Total Duration: {getTotalDuration()} min</p>
+                        <p className="text-sm text-muted-foreground">
+                          Estimated wait: ~{shop.currentQueue * getTotalDuration()} minutes
+                        </p>
+                        {isPriority && (
+                          <div className="mt-2 space-y-1">
+                            <p className="text-xs text-muted-foreground">Base Price: ₹{getBasePrice()}</p>
+                            <p className="text-xs font-semibold text-yellow-600">Priority Fee (150%): +₹{getPriceHike()}</p>
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-primary">₹{getTotalPrice()}</p>
+                        {isPriority && (
+                          <p className="text-xs text-muted-foreground mt-1">Priority booking</p>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-primary">₹{getTotalPrice()}</p>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Emergency Option for Queue */}
@@ -377,7 +412,7 @@ const ServiceSelection = ({ shop, onServiceSelect, onBack }) => {
                       />
                       <Badge variant="outline" className="mt-2 bg-yellow-50 border-yellow-200 text-yellow-800">
                         <AlertCircle className="w-3 h-3 mr-1" />
-                        Emergency bookings get priority
+                        Emergency bookings get priority (150% price increase, online payment required)
                       </Badge>
                     </div>
                   )}
@@ -386,15 +421,36 @@ const ServiceSelection = ({ shop, onServiceSelect, onBack }) => {
                 {/* Payment Options for Queue */}
                 <Card className="p-4">
                   <Label className="font-semibold mb-3 block">Payment Option</Label>
-                  <RadioGroup value={paymentOption} onValueChange={(value: any) => setPaymentOption(value)}>
+                  {isPriority && (
+                    <div className="mb-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <p className="text-sm text-yellow-800">
+                        <strong>Priority bookings require online payment</strong>
+                      </p>
+                    </div>
+                  )}
+                  <RadioGroup 
+                    value={paymentOption} 
+                    onValueChange={(value: any) => {
+                      if (!isPriority) {
+                        setPaymentOption(value);
+                      }
+                    }}
+                    disabled={isPriority}
+                  >
                     <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="pay_at_shop" id="pay_at_shop_queue" />
-                        <Label htmlFor="pay_at_shop_queue" className="cursor-pointer text-sm">Pay at Shop</Label>
+                      <div className={`flex items-center space-x-2 ${isPriority ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        <RadioGroupItem value="pay_at_shop" id="pay_at_shop_queue" disabled={isPriority} />
+                        <Label htmlFor="pay_at_shop_queue" className={`${isPriority ? 'cursor-not-allowed' : 'cursor-pointer'} text-sm`}>
+                          Pay at Shop
+                          {isPriority && <span className="text-xs text-muted-foreground ml-1">(Not available)</span>}
+                        </Label>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="pay_after_service" id="pay_after_queue" />
-                        <Label htmlFor="pay_after_queue" className="cursor-pointer text-sm">Pay After Service</Label>
+                        <RadioGroupItem value="pay_now" id="pay_now_queue" disabled={false} checked={paymentOption === 'pay_now'} />
+                        <Label htmlFor="pay_now_queue" className="cursor-pointer text-sm">
+                          Pay Now
+                          {isPriority && <span className="text-xs text-primary ml-1 font-semibold">(Required)</span>}
+                        </Label>
                       </div>
                     </div>
                   </RadioGroup>
@@ -468,7 +524,16 @@ const ServiceSelection = ({ shop, onServiceSelect, onBack }) => {
                   </div>
 
                   <Button
-                    onClick={() => {}}
+                    onClick={() => {
+                      // Force state update to ensure AppointmentBooking component is shown
+                      // The early return at line 221 will render AppointmentBooking when
+                      // bookingMode === 'appointment' && selectedServices.length > 0
+                      setBookingMode('appointment');
+                      // Small delay to ensure state update propagates, then scroll
+                      setTimeout(() => {
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }, 0);
+                    }}
                     className="w-full py-6 text-lg bg-primary hover:bg-primary/90 text-primary-foreground"
                   >
                     <Calendar className="w-4 h-4 mr-2" />

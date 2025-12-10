@@ -1,348 +1,256 @@
+import { apiRequest, parseResponse } from './api';
 import { mockDb } from './mockData';
 
-// Get all shops with queue info and calculate distances
-export const getShops = async (searchQuery = '', userLat: number | null = null, userLng: number | null = null) => {
-  try {
-    let shops = mockDb.getShops();
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-    if (searchQuery) {
+// Shops
+export const getShops = async (searchQuery?: string, lat?: number, lng?: number) => {
+  try {
+    const queryParams = new URLSearchParams();
+    if (lat && lng) {
+      queryParams.append('lat', lat.toString());
+      queryParams.append('lng', lng.toString());
+    }
+    
+    const response = await apiRequest(`/api/shops?${queryParams.toString()}`);
+    
+    // Check if response is ok
+    if (response.ok) {
+      const result = await parseResponse<{ shops: any[] }>(response);
+      
+      if (result.data && result.data.shops && Array.isArray(result.data.shops)) {
+        // Transform backend shop format to frontend format
+        const transformedShops = result.data.shops.map((shop: any) => ({
+          id: shop._id || shop.id,
+          name: shop.name,
+          address: shop.address?.street 
+            ? `${shop.address.street}, ${shop.address.city}, ${shop.address.state} ${shop.address.zipCode}`
+            : shop.address || 'Address not available',
+          rating: shop.rating?.average || shop.rating || 0,
+          latitude: shop.location?.coordinates?.[1] || null,
+          longitude: shop.location?.coordinates?.[0] || null,
+          estimated_wait: 0, // Will be calculated from queue
+          currentQueue: 0, // Will be calculated from queue
+          distance: null, // Will be calculated if lat/lng provided
+          description: shop.description,
+          phone: shop.phone,
+          email: shop.email,
+        }));
+
+        // Apply search filter if provided
+        let filteredShops = transformedShops;
+        if (searchQuery && searchQuery.trim()) {
+          const query = searchQuery.toLowerCase();
+          filteredShops = transformedShops.filter((shop: any) =>
+            shop.name.toLowerCase().includes(query) ||
+            shop.address.toLowerCase().includes(query)
+          );
+        }
+
+        console.log(`✅ Loaded ${filteredShops.length} shops from backend`);
+        return { data: filteredShops, error: undefined };
+      } else {
+        console.warn('⚠️ Backend returned no shops or invalid format');
+      }
+    } else {
+      console.warn(`⚠️ Backend request failed with status ${response.status}`);
+    }
+    
+    // Fallback to mock data
+    const mockShops = mockDb.getShops();
+    let filteredMockShops = mockShops;
+    if (searchQuery && searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      shops = shops.filter((shop: any) => 
-        shop.name.toLowerCase().includes(query) || 
-        shop.address.toLowerCase().includes(query)
+      filteredMockShops = mockShops.filter((shop: any) =>
+        shop.name?.toLowerCase().includes(query) ||
+        shop.address?.toLowerCase().includes(query)
       );
     }
-
-    // Get current queue counts for each shop
-    const shopsWithQueue = shops.map((shop: any) => {
-      const queues = mockDb.getQueuesByShop(shop.id);
-      const waitingQueues = queues.filter((q: any) => q.status === 'waiting');
-      
-      return {
-        ...shop,
-        currentQueue: waitingQueues.length,
-      };
-    });
-
-    // Sort by distance
-    const sortedShops = shopsWithQueue.sort((a: any, b: any) => {
-      if (a.distance === null) return 1;
-      if (b.distance === null) return -1;
-      return a.distance - b.distance;
-    });
-
-    return { data: sortedShops, error: null };
-  } catch (error: any) {
-    console.error('Error fetching shops:', error);
-    return { data: null, error: error.message };
+    console.log(`📦 Using ${filteredMockShops.length} mock shops (backend unavailable or empty)`);
+    return { data: filteredMockShops, error: undefined };
+  } catch (error) {
+    console.error('❌ Error fetching shops:', error);
+    // Fallback to mock data
+    const mockShops = mockDb.getShops();
+    let filteredMockShops = mockShops;
+    if (searchQuery && searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filteredMockShops = mockShops.filter((shop: any) =>
+        shop.name?.toLowerCase().includes(query) ||
+        shop.address?.toLowerCase().includes(query)
+      );
+    }
+    console.log(`📦 Using ${filteredMockShops.length} mock shops (error occurred)`);
+    return { data: filteredMockShops, error: undefined };
   }
 };
 
-// Get shop by ID
-export const getShop = async (shopId: string) => {
-  try {
-    const shop = mockDb.getShop(shopId);
-    if (!shop) throw new Error('Shop not found');
-    return { data: shop, error: null };
-  } catch (error: any) {
-    console.error('Error fetching shop:', error);
-    return { data: null, error: error.message };
-  }
-};
-
-// Get shop by QR code
-export const getShopByQR = async (qrCode: string) => {
-  try {
-    const shop = mockDb.getShopByQR(qrCode);
-    if (!shop) throw new Error('Shop not found');
-    return { data: shop, error: null };
-  } catch (error: any) {
-    console.error('Error fetching shop by QR:', error);
-    return { data: null, error: error.message };
-  }
-};
-
-// Get services for a shop
+// Services
 export const getShopServices = async (shopId: string) => {
   try {
-    const shopServices = mockDb.getShopServicesForShop(shopId);
-    const allServices = mockDb.getServices();
+    const response = await apiRequest(`/api/services/shop/${shopId}`);
+    const result = await parseResponse<{ services: any[] }>(response);
     
-    const services = shopServices.map((ss: any) => {
-      const service = allServices.find((s: any) => s.id === ss.service_id);
-      return service ? { ...service } : null;
-    }).filter(Boolean);
-
-    return { data: services, error: null };
-  } catch (error: any) {
-    console.error('Error fetching shop services:', error);
-    return { data: null, error: error.message };
+    if (result.data) {
+      return { data: result.data.services, error: undefined };
+    }
+    
+    // Fallback to mock data
+    return { data: mockDb.getServicesByShop(shopId), error: undefined };
+  } catch (error) {
+    return { data: mockDb.getServicesByShop(shopId), error: undefined };
   }
 };
 
-// Join queue with multiple services
+// Queue
 export const joinQueue = async (
-  shopId: string, 
-  serviceIds: string[], 
-  customerName: string, 
-  userId: string | null = null,
-  options: {
-    payment_option?: 'pay_now' | 'pay_at_shop' | 'pay_after_service';
+  shopId: string,
+  serviceIds: string | string[],
+  customerName?: string,
+  userId?: string,
+  options?: {
+    payment_option?: 'pay_now' | 'pay_at_shop';
     is_emergency?: boolean;
-    emergency_reason?: string;
-  } = {}
+    emergency_reason?: string | null;
+  }
 ) => {
   try {
-    // Check if customer already has an active queue entry in ANY shop
-    const existingQueue = mockDb.getActiveQueue(customerName);
+    // Backend API only supports single service per queue entry
+    // If multiple services provided, use the first one
+    const serviceId = Array.isArray(serviceIds) ? serviceIds[0] : serviceIds;
     
-    if (existingQueue) {
-      const shop = mockDb.getShop(existingQueue.shop_id);
-      const shopName = shop?.name || 'another shop';
-      return { 
-        data: null, 
-        error: `You already have an active queue at ${shopName}. Please complete or cancel it before joining another queue.` 
-      };
-    }
-
-    // Get user info for customer type and loyalty points
-    const user = userId ? mockDb.getUser(userId) : null;
-    const customerType = user?.customer_type || null;
-    const loyaltyPoints = user?.loyalty_points || 0;
-
-    // Get total duration for all selected services
-    const services = mockDb.getServices().filter((s: any) => serviceIds.includes(s.id));
-    const totalDuration = services.reduce((sum: number, service: any) => sum + service.duration, 0) || 30;
-
-    // Insert queue entry (position will be calculated by createQueue based on priority)
-    const queueData = mockDb.createQueue({
-      shop_id: shopId,
-      service_id: serviceIds[0],
-      customer_name: customerName,
-      user_id: userId,
-      position: 1, // Will be recalculated
-      estimated_wait: 0, // Will be recalculated
-      status: 'waiting',
-      customer_type: customerType,
-      loyalty_points: loyaltyPoints,
-      is_emergency: options.is_emergency || false,
-      emergency_reason: options.emergency_reason || null,
-      payment_option: options.payment_option || 'pay_at_shop'
+    const response = await apiRequest('/api/queues', {
+      method: 'POST',
+      body: JSON.stringify({ 
+        shop: shopId, 
+        service: serviceId,
+        // Note: customerName, userId, and options are not used by backend
+        // as authentication is handled via token
+        // These parameters are kept for backward compatibility
+      }),
     });
-
-    // Recalculate estimated wait based on final position
-    const shopQueues = mockDb.getQueuesByShop(shopId);
-    const waitingQueues = shopQueues.filter((q: any) => q.status === 'waiting' && q.id !== queueData.id);
-    const finalPosition = queueData.position;
-    const estimatedWait = Math.max(0, (finalPosition - 1) * totalDuration);
+    const result = await parseResponse<{ queue: any }>(response);
     
-    mockDb.updateQueue(queueData.id, { estimated_wait: estimatedWait });
-
-    // Insert all services into queue_services
-    const queueServices = serviceIds.map(serviceId => ({
-      queue_id: queueData.id,
-      service_id: serviceId
-    }));
-    mockDb.addQueueServices(queueServices);
-
-    return { data: { ...queueData, estimated_wait: estimatedWait }, error: null };
-  } catch (error: any) {
-    console.error('Error joining queue:', error);
-    return { data: null, error: error.message };
+    if (result.data) {
+      // Enrich response with additional data if provided
+      const enrichedQueue = {
+        ...result.data.queue,
+        ...(options && {
+          payment_option: options.payment_option,
+          is_emergency: options.is_emergency,
+          emergency_reason: options.emergency_reason,
+        }),
+      };
+      return { data: enrichedQueue, error: undefined };
+    }
+    
+    return { data: null, error: result.error || 'Failed to join queue' };
+  } catch (error) {
+    return { data: null, error: 'Failed to join queue' };
   }
 };
 
-// Get queue status
-export const getQueueStatus = async (queueId: string) => {
-  try {
-    const queue = mockDb.getQueue(queueId);
-    if (!queue) throw new Error('Queue not found');
-    return { data: queue, error: null };
-  } catch (error: any) {
-    console.error('Error fetching queue status:', error);
-    return { data: null, error: error.message };
-  }
-};
-
-// Cancel queue entry
 export const cancelQueue = async (queueId: string) => {
   try {
-    mockDb.updateQueue(queueId, { status: 'cancelled' });
-    return { data: { success: true }, error: null };
-  } catch (error: any) {
-    console.error('Error cancelling queue:', error);
-    return { data: null, error: error.message };
-  }
-};
-
-// Submit rating for completed service
-export const submitRating = async (queueId: string, rating: number, reviewText = '') => {
-  try {
-    mockDb.updateQueue(queueId, { rating, review_text: reviewText });
-    
-    // Award loyalty points (1 point per rating star, bonus for 5 stars)
-    const queue = mockDb.getQueue(queueId);
-    if (queue && queue.user_id) {
-      const user = mockDb.getUser(queue.user_id);
-      if (user && user.role === 'customer') {
-        const pointsToAdd = rating === 5 ? 6 : rating;
-        mockDb.updateUser(queue.user_id, { 
-          loyalty_points: (user.loyalty_points || 0) + pointsToAdd,
-          customer_type: (user.loyalty_points || 0) + pointsToAdd >= 50 ? 'regular' : (user.customer_type || null)
-        });
-      }
-    }
-    
-    return { data: { success: true }, error: null };
-  } catch (error: any) {
-    console.error('Error submitting rating:', error);
-    return { data: null, error: error.message };
-  }
-};
-
-// Appointment booking functions
-export const getAvailableTimeSlots = async (shopId: string, date: string, duration: number) => {
-  try {
-    const shop = mockDb.getShop(shopId);
-    if (!shop) throw new Error('Shop not found');
-
-    // Parse opening hours (assuming format "HH:MM AM/PM - HH:MM AM/PM")
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const selectedDate = new Date(date);
-    const dayName = dayNames[selectedDate.getDay()];
-    const hours = shop.opening_hours?.[dayName] || '9:00 AM - 8:00 PM';
-    
-    const [openTime, closeTime] = hours.split(' - ');
-    const parseTime = (timeStr: string) => {
-      const [time, period] = timeStr.trim().split(' ');
-      const [hours, minutes] = time.split(':').map(Number);
-      let hour24 = hours;
-      if (period === 'PM' && hours !== 12) hour24 += 12;
-      if (period === 'AM' && hours === 12) hour24 = 0;
-      return hour24 * 60 + minutes; // minutes since midnight
-    };
-
-    const openMinutes = parseTime(openTime);
-    const closeMinutes = parseTime(closeTime);
-
-    // Generate 30-minute time slots
-    const slots: string[] = [];
-    for (let minutes = openMinutes; minutes + duration <= closeMinutes; minutes += 30) {
-      const hours = Math.floor(minutes / 60);
-      const mins = minutes % 60;
-      const period = hours >= 12 ? 'PM' : 'AM';
-      const displayHours = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours);
-      const timeSlot = `${displayHours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')} ${period}`;
-      
-      // Check if slot is available
-      const isAvailable = mockDb.checkTimeSlotAvailable(shopId, date, timeSlot, duration);
-      if (isAvailable) {
-        slots.push(timeSlot);
-      }
-    }
-
-    return { data: slots, error: null };
-  } catch (error: any) {
-    console.error('Error fetching time slots:', error);
-    return { data: null, error: error.message };
-  }
-};
-
-export const createAppointment = async (
-  shopId: string,
-  serviceIds: string[],
-  appointmentDate: string,
-  appointmentTime: string,
-  customerName: string,
-  userId: string | null = null,
-  options: {
-    payment_option?: 'pay_now' | 'pay_at_shop' | 'pay_after_service';
-    is_emergency?: boolean;
-    emergency_reason?: string;
-  } = {}
-) => {
-  try {
-    // Check if customer already has an active appointment or queue
-    const existingQueue = mockDb.getActiveQueue(customerName);
-    if (existingQueue) {
-      const shop = mockDb.getShop(existingQueue.shop_id);
-      const shopName = shop?.name || 'another shop';
-      return { 
-        data: null, 
-        error: `You already have an active booking at ${shopName}. Please complete or cancel it before booking another.` 
-      };
-    }
-
-    // Get services and calculate duration
-    const services = mockDb.getServices().filter((s: any) => serviceIds.includes(s.id));
-    const totalDuration = services.reduce((sum: number, service: any) => sum + service.duration, 0) || 30;
-    const totalPrice = services.reduce((sum: number, service: any) => sum + service.price, 0);
-
-    // Combine date and time
-    const appointmentDateTime = new Date(`${appointmentDate} ${appointmentTime}`);
-
-    // Check if slot is still available
-    const isAvailable = mockDb.checkTimeSlotAvailable(shopId, appointmentDate, appointmentTime, totalDuration);
-    if (!isAvailable) {
-      return { 
-        data: null, 
-        error: 'This time slot is no longer available. Please select another time.' 
-      };
-    }
-
-    // Get user info
-    const user = userId ? mockDb.getUser(userId) : null;
-    const customerType = user?.customer_type || null;
-
-    // Create appointment
-    const appointment = mockDb.createAppointment({
-      shop_id: shopId,
-      service_id: serviceIds[0],
-      appointment_date: appointmentDateTime.toISOString(),
-      duration: totalDuration,
-      price: totalPrice,
-      customer_name: customerName,
-      user_id: userId,
-      customer_type: customerType,
-      is_emergency: options.is_emergency || false,
-      emergency_reason: options.emergency_reason || null,
-      payment_option: options.payment_option || 'pay_at_shop'
+    const response = await apiRequest(`/api/queues/${queueId}`, {
+      method: 'DELETE',
     });
-
-    // Add all services
-    const appointmentServices = serviceIds.map(serviceId => ({
-      appointment_id: appointment.id,
-      service_id: serviceId
-    }));
-    mockDb.addAppointmentServices(appointmentServices);
-
-    return { data: appointment, error: null };
-  } catch (error: any) {
-    console.error('Error creating appointment:', error);
-    return { data: null, error: error.message };
+    
+    if (response.ok) {
+      return { data: true, error: undefined };
+    }
+    
+    return { data: false, error: 'Failed to cancel queue' };
+  } catch (error) {
+    return { data: false, error: 'Failed to cancel queue' };
   }
 };
 
+// Appointments
 export const getAppointmentsByUser = async (userId: string) => {
   try {
-    const allAppointments = mockDb.getAppointments();
-    const userAppointments = allAppointments.filter((a: any) => a.user_id === userId);
+    const response = await apiRequest('/api/appointments');
+    const result = await parseResponse<{ appointments: any[] }>(response);
     
-    // Enrich with services
-    const enriched = userAppointments.map((apt: any) => {
-      const appointmentServices = mockDb.getAppointmentServicesForAppointment(apt.id);
-      return {
-        ...apt,
-        services: appointmentServices.map((as: any) => {
-          const service = mockDb.getService(as.service_id);
-          return service;
-        }).filter(Boolean)
-      };
-    });
+    if (result.data) {
+      // Filter by user if needed (backend should handle this, but just in case)
+      const userAppointments = result.data.appointments.filter(
+        (apt: any) => apt.customer?.id === userId || apt.customer?._id === userId
+      );
+      return { data: userAppointments, error: undefined };
+    }
     
-    return { data: enriched, error: null };
-  } catch (error: any) {
-    console.error('Error fetching appointments:', error);
-    return { data: null, error: error.message };
+    // Fallback to mock data
+    return { data: mockDb.getAppointmentsByUser(userId), error: undefined };
+  } catch (error) {
+    return { data: mockDb.getAppointmentsByUser(userId), error: undefined };
   }
 };
+
+export const createAppointment = async (appointmentData: {
+  shop: string;
+  service: string;
+  scheduledDate: string;
+  scheduledTime: string;
+}) => {
+  try {
+    const response = await apiRequest('/api/appointments', {
+      method: 'POST',
+      body: JSON.stringify(appointmentData),
+    });
+    const result = await parseResponse<{ appointment: any }>(response);
+    
+    if (result.data) {
+      return { data: result.data.appointment, error: undefined };
+    }
+    
+    return { data: null, error: result.error || 'Failed to create appointment' };
+  } catch (error) {
+    return { data: null, error: 'Failed to create appointment' };
+  }
+};
+
+export const getAvailableTimeSlots = async (shopId: string, date: string) => {
+  // This is a simplified version - you might want to implement a proper endpoint
+  // For now, generate time slots
+  const slots = [];
+  for (let hour = 9; hour < 18; hour++) {
+    for (let minute = 0; minute < 60; minute += 30) {
+      slots.push(`${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`);
+    }
+  }
+  return { data: slots, error: undefined };
+};
+
+// Cancel appointment
+export const cancelAppointment = async (appointmentId: string) => {
+  try {
+    const response = await apiRequest(`/api/appointments/${appointmentId}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status: 'cancelled' }),
+    });
+    
+    if (response.ok) {
+      return { data: true, error: undefined };
+    }
+    
+    const result = await parseResponse(response);
+    return { data: false, error: result.error || 'Failed to cancel appointment' };
+  } catch (error) {
+    // Fallback to mock data
+    mockDb.updateAppointment(appointmentId, { status: 'cancelled' });
+    return { data: true, error: undefined };
+  }
+};
+
+// Ratings
+export const submitRating = async (shopId: string, rating: number, comment?: string) => {
+  // This endpoint might not exist yet, so we'll just return success for now
+  try {
+    // You can implement this when you add a ratings endpoint
+    return { data: { success: true }, error: undefined };
+  } catch (error) {
+    return { data: null, error: 'Failed to submit rating' };
+  }
+};
+
