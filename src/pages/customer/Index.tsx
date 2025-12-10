@@ -6,6 +6,7 @@ import heroImage from "@/assets/hero-barber.jpg";
 import ShopList from '@/components/customer/ShopList';
 import ServiceSelection from '@/components/customer/ServiceSelection';
 import QueueStatus from '@/components/customer/QueueStatus';
+import AppointmentConfirmation from '@/components/customer/AppointmentConfirmation';
 import ProfileSettings from '@/components/customer/ProfileSettings';
 import ActiveQueueBanner from '@/components/customer/ActiveQueueBanner';
 import MyAppointments from '@/components/customer/MyAppointments';
@@ -15,10 +16,11 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Calendar } from 'lucide-react';
 const Index = () => {
-  const [view, setView] = useState('home'); // home, shops, service, queue, profile, appointments
+  const [view, setView] = useState('home'); // home, shops, service, queue, appointment-confirm, profile, appointments
   const [selectedShop, setSelectedShop] = useState(null);
   const [selectedService, setSelectedService] = useState(null);
   const [queueData, setQueueData] = useState(null);
+  const [appointmentData, setAppointmentData] = useState(null);
   const {
     user,
     isShopOwner,
@@ -38,10 +40,24 @@ const Index = () => {
     setSelectedShop(shop);
     setView('service');
   };
-  const handleServiceSelect = (service, queue) => {
-    setSelectedService(service);
-    setQueueData(queue);
-    setView('queue');
+  const handleServiceSelect = (service, data) => {
+    // Check if data is an appointment (has scheduledDate or appointment_date) or a queue
+    const isAppointment = data && (
+      data.scheduledDate || 
+      data.appointment_date || 
+      data._id?.toString().startsWith('appointment_') ||
+      data.id?.toString().startsWith('appointment_')
+    );
+    
+    if (isAppointment) {
+      setSelectedService(service);
+      setAppointmentData(data);
+      setView('appointment-confirm');
+    } else {
+      setSelectedService(service);
+      setQueueData(data);
+      setView('queue');
+    }
   };
   const handleBackToShops = () => {
     setView('shops');
@@ -64,6 +80,17 @@ const Index = () => {
   }
   if (view === 'queue' && queueData) {
     return <QueueStatus queueData={queueData} service={selectedService} shop={selectedShop} onBack={handleBackToShops} />;
+  }
+  if (view === 'appointment-confirm' && appointmentData && selectedShop) {
+    return (
+      <AppointmentConfirmation 
+        appointment={appointmentData}
+        shop={selectedShop}
+        services={Array.isArray(selectedService) ? selectedService : [selectedService]}
+        onBack={handleBackToShops}
+        onViewAppointments={() => setView('appointments')}
+      />
+    );
   }
   if (view === 'profile') {
     return <ProfileSettings onBack={() => setView('home')} />;

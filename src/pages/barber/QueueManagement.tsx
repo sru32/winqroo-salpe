@@ -29,7 +29,7 @@ interface QueueEntry {
   customer_type?: 'vip' | 'regular' | null;
   is_emergency?: boolean;
   emergency_reason?: string;
-  payment_option?: 'pay_now' | 'pay_at_shop' | 'pay_after_service';
+  payment_option?: 'pay_now' | 'pay_at_shop';
 }
 
 interface AppointmentEntry {
@@ -42,7 +42,7 @@ interface AppointmentEntry {
   customer_type?: 'vip' | 'regular' | null;
   is_emergency?: boolean;
   emergency_reason?: string;
-  payment_option?: 'pay_now' | 'pay_at_shop' | 'pay_after_service';
+  payment_option?: 'pay_now' | 'pay_at_shop';
 }
 
 const QueueManagement = () => {
@@ -255,8 +255,6 @@ const QueueManagement = () => {
     switch (paymentOption) {
       case 'pay_now':
         return <Badge variant="outline" className="bg-green-50">Paid</Badge>;
-      case 'pay_after_service':
-        return <Badge variant="outline" className="bg-blue-50">Pay After</Badge>;
       default:
         return <Badge variant="outline">Pay at Shop</Badge>;
     }

@@ -368,7 +368,7 @@ const ServiceSelection = ({ shop, onServiceSelect, onBack }) => {
                       <div>
                         <p className="text-sm text-muted-foreground">Total Duration: {getTotalDuration()} min</p>
                         <p className="text-sm text-muted-foreground">
-                          Estimated wait: ~{shop.currentQueue * getTotalDuration()} minutes
+                          Estimated wait: ~{((shop.currentQueue || 0) * getTotalDuration()) || 0} minutes
                         </p>
                         {isPriority && (
                           <div className="mt-2 space-y-1">
